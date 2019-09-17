@@ -1,0 +1,418 @@
+%{
+#include "yystype.h"
+#include <cstdio>
+#include <cassert>
+#include <cstring>
+#include <cstdarg>
+#include <iostream>
+#include <sstream>
+#include <fstream>
+
+using namespace std;
+
+#define IF_VERBOSE if(verbose_mode)
+bool verbose_mode = 0;
+bool inside_parallel = 0;
+int ast_node::id_counter=0;
+
+std::list<source*> sources;
+source* current_src=0;
+std::string tmpstr;
+
+#if 0 
+/* Size of parser stacks
+#define YYINITDEPTH 200 (default)
+#define YYMAXDEPTH 10000 (default)
+*/
+#endif
+%}
+
+
+%token SIN
+%token FOR
+%token IDENTIFIER
+%token INT
+%token FLOAT
+
+
+%left '+' '-'
+%left '*' '/' '%'
+
+%%
+
+slc: 
+	seq_of_stmts
+	{
+		info("slc:	seq_of_stmts"); 
+		$$ = new ast_node(ast_slc, "");
+		$$->children.push_front($1);
+		current_src->ast=$$;
+	}
+ ;
+
+seq_of_stmts:
+	stmt 
+	{ 
+		info("seq_of_stmts:	   stmt "); 
+		$$ = new ast_node(ast_seq_of_stmts, "");
+		$$->children.push_back($1);
+	}
+  |	seq_of_stmts    stmt       { info("seq_of_stmts:	seq_of_stmts     stmt"); $$=$1; $$->children.push_back($2); }
+ ;
+
+stmt:
+   memref '=' expression ';'
+	{ 
+		info("memref '=' expression ';'"); 
+		$$ = new ast_node(ast_GETS, "");
+		$$->children.push_back($1);
+		$$->children.push_back($3);
+	}
+ | FOR '(' loop_init ';' loop_test ';' loop_update ')' '{' seq_of_stmts '}'
+	 {
+		info("stmt: FOR '(' loop_init ';' loop_test ';' loop_update ')' '{' seq_of_stmts '}'"); 
+		$$ = new ast_node(ast_FOR, "");
+		$$->children.push_back($3);
+		$$->children.push_back($5);
+		$$->children.push_back($7);
+		$$->children.push_back($10);
+	 }
+ ;
+
+memref:
+	IDENTIFIER
+	 {
+		info("memref: IDENTIFIER"); 
+		$$=$1;
+		$$->type = ast_memref;
+	 }
+  | IDENTIFIER '[' IDENTIFIER ']'
+	 {
+		info("memref: IDENTIFIER '[' IDENTIFIER ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+  | IDENTIFIER '[' INT ']'
+	 {
+		info("memref: IDENTIFIER '[' INT ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+  | IDENTIFIER '[' IDENTIFIER ']' '[' IDENTIFIER ']'
+	 {
+		info("memref: IDENTIFIER '[' IDENTIFIER ']' '[' IDENTIFIER ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "][" << $6->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+  | IDENTIFIER '[' IDENTIFIER ']' '[' INT        ']'
+	 {
+		info("memref: IDENTIFIER '[' IDENTIFIER ']' '[' INT        ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "][" << $6->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+  | IDENTIFIER '[' INT ']'        '[' IDENTIFIER ']'
+	 {
+		info("memref: IDENTIFIER '[' INT ']'        '[' IDENTIFIER ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "][" << $6->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+  | IDENTIFIER '[' INT ']'        '[' INT ']'
+	 {
+		info("memref: IDENTIFIER '[' INT ']'        '[' INT ']'"); 
+		ostringstream oss;
+		oss << $1->value << "[" << $3->value << "][" << $6->value << "]";
+		$$=$1;
+		$$->type = ast_memref;
+		$$->value = oss.str();
+	 }
+ ;
+
+loop_init:
+	memref '=' INT 
+	 {
+		info("loop_init: memref '=' INT"); 
+		$$ = new ast_node(ast_loop_init, "");
+		$$->children.push_back($1);
+		$$->children.push_back($3);
+	 }
+  |	memref '=' memref 
+	 {
+		info("loop_init: memref '=' memref"); 
+		$$ = new ast_node(ast_loop_init, "");
+		$$->children.push_back($1);
+		$$->children.push_back($3);
+	 }
+ ;
+loop_test:
+	memref '<' memref
+	 {
+		info("loop_test: memref '<' memref"); 
+		$$ = new ast_node(ast_loop_test, "");
+		$$->children.push_back($1);
+		$$->children.push_back($3);
+	 }
+  |	memref '<' INT
+	 {
+		info("loop_test: memref '<' INT"); 
+		$$ = new ast_node(ast_loop_test, "");
+		$$->children.push_back($1);
+		$$->children.push_back($3);
+	 }
+ ;
+loop_update:
+	memref '+' '+'
+	 {
+		info("loop_update: memref '+' '+'"); 
+		$$ = new ast_node(ast_loop_update, "");
+		$$->children.push_back($1);
+	 }
+ ;
+
+expression:
+	  SIN '(' expression ')' 
+	  	{
+			info("expression: SIN '(' expression ')'"); 
+			$$ = new ast_node(ast_expression, "SIN");
+			$$->children.push_back($3);
+		}
+	| expression '*' expression 
+	  	{
+			info("expression: expression '*' expression"); 
+			$$ = new ast_node(ast_expression, "MUL");
+			$$->children.push_back($1);
+			$$->children.push_back($3);
+		}
+	| expression '+' expression 
+	  	{
+			info("expression: expression '+' expression"); 
+			$$ = new ast_node(ast_expression, "ADD");
+			$$->children.push_back($1);
+			$$->children.push_back($3);
+		}
+	| float_or_int 
+	  	{
+			info("expression: float_or_int"); 
+			$$=$1;
+		}
+	| memref
+	  	{
+			info("expression: memref"); 
+			$$=$1;
+		}
+ ;
+
+float_or_int:
+	  INT
+	  	{
+			info("float_or_int: INT"); 
+			$$=$1;
+		}
+	| FLOAT 
+	  	{
+			info("float_or_int: FLOAT"); 
+			$$=$1;
+		}
+ ;
+
+
+%%
+
+void
+info(const char *s, ...)
+{
+	if( verbose_mode ) { 
+		va_list params;
+		va_start(params, s);
+		fprintf(stderr, "%d: info: ", yylineno);
+		vfprintf(stderr, s, params);
+		fprintf(stderr, "\n");
+	}
+}
+
+void
+yyerror(const char *s, ...)
+{
+	va_list params;
+	va_start(params, s);
+	fprintf(stderr, "%d: error: ", yylineno);
+	vfprintf(stderr, s, params);
+	fprintf(stderr, "\n");
+}
+
+const std::string 
+type2string(ast_types t)
+{
+	switch(t) {
+		case ast_slc:					return "slc";
+		case ast_SIN:					return "SIN";
+		case ast_FOR: 					return "FOR";
+		case ast_loop_init: 			return "loop_init";
+		case ast_loop_test: 			return "loop_test";
+		case ast_loop_update: 			return "loop_update";
+		case ast_IDENTIFIER:			return "IDENTIFIER";
+		case ast_memref:				return "memref";
+		case ast_INT:					return "INT";
+		case ast_FLOAT:					return "FLOAT";
+		case ast_seq_of_stmts:			return "seq_of_stmts";
+		case ast_GETS:					return "GETS";
+		case ast_expression:			return "expression";
+		case ast_UNDEFINED:				return "UNDEFINED";
+	}
+  cerr << "unknown type " << t << endl;
+  assert(0);
+  return "";
+}
+
+void
+ast_visitor(const ast_node* const ast, ofstream& ofs)
+{
+	switch(ast->type) {
+	default:
+		ofs << ast->id << "[label=\"" << ast->id <<": " <<type2string(ast->type);
+		if(!ast->value.empty())
+			ofs << "(" << ast->value << ")";
+		ofs << "\"]";
+		ofs << endl;
+	}
+	for(list<ast_node*>::const_iterator it=ast->children.begin();it!=ast->children.end();it++) {
+		ast_visitor(*it, ofs);
+		ofs << ast->id << "->" << (*it)->id << endl;
+	}
+}
+
+void 
+ast2dot(void)
+{
+  for(list<source*>::const_iterator it=sources.begin();it!=sources.end();it++) {
+	source* src=*it;
+	if(!src->parseresult) {
+		IF_VERBOSE cout << "Create .dot file of " << src->filename << "." << endl;
+		ostringstream oss_dotfile,oss_cmdline;
+		oss_dotfile << src->filename << ".dot";
+		ofstream ofs(oss_dotfile.str().c_str());
+		ofs << "digraph {" << endl;
+		ast_visitor(src->ast, ofs);
+		ofs << "}" << endl;
+		ofs.close();
+		long begin,end;
+		ifstream ifs(oss_dotfile.str().c_str());
+		begin = ifs.tellg();
+		ifs.seekg (0, ios::end);
+		end = ifs.tellg();
+		ifs.close();
+		// If size if less than 4K
+		if( (end-begin)<1024*4 ) {
+			oss_cmdline << "dot -Teps -o " << src->filename << ".eps" << " " << oss_dotfile.str() << ";";
+			oss_cmdline << "dot -Tpdf -o " << src->filename << ".pdf" << " " << oss_dotfile.str() << ";";
+			IF_VERBOSE cout<<"Generate postscript and pdf files ... ";
+			int rc=system(oss_cmdline.str().c_str());
+			IF_VERBOSE if(!rc) cout << "ok.\n"; else cout << "error.\n";
+		}
+	}
+  }
+}
+
+void
+ast2python_visitor(const ast_node* const ast, ofstream& ofs)
+{
+	ofs << ast->id << ": ("
+		<< "'"<<type2string(ast->type)<<"'"
+		<< ", "
+		<< "'"<<ast->value<<"'"
+		<< ", [";
+	for(list<ast_node*>::const_iterator it=ast->children.begin();it!=ast->children.end();it++) {
+		if(it!=ast->children.begin()) ofs << ", ";
+		ofs << (*it)->id ;
+	}
+	ofs << "]),\n";
+	for(list<ast_node*>::const_iterator it=ast->children.begin();it!=ast->children.end();it++)
+		ast2python_visitor(*it, ofs);
+}
+
+void 
+ast2python(void)
+{
+  int rc;
+  for(list<source*>::const_iterator it=sources.begin();it!=sources.end();it++) {
+	source* src=*it;
+	if(!src->parseresult) {
+		IF_VERBOSE cout << "Generate python file with AST of input code from " << src->filename << " ...";
+		ostringstream oss_dotfile,oss_cmdline;
+		oss_dotfile << src->filename << ".py";
+		ofstream ofs(oss_dotfile.str().c_str());
+		ofs << "{\n";
+		ast2python_visitor(src->ast, ofs);
+		ofs << "}\n";
+		ofs.close();
+		IF_VERBOSE cout << "ok.\n";
+		// Unparse AST
+		oss_cmdline << "python unparser.py " << src->filename << ".py;";
+		IF_VERBOSE cout<<"Unparse AST by executing command line '"<<oss_cmdline.str()  <<"' ... "; cout.flush();
+		rc=system(oss_cmdline.str().c_str());
+		IF_VERBOSE if(!rc) cout << "ok.\n"; else cout << "error.\n";
+		if(rc) exit(1);
+	}
+  }
+}
+
+int
+main(int argc, char **argv)
+{
+	int i, rc=0, files=0;
+	if( argc >= 2 ) {  // from input files
+		for(i=1;i<argc;i++) 
+			if( !strcmp("-v", argv[i]) ) verbose_mode = 1;
+		for(i=1;i<argc;i++) {
+			if( strcmp("-v", argv[i]) ) 
+			{
+				FILE *f = fopen(argv[i], "r");
+				if(!f) {
+					perror(argv[1]);
+					return 1;
+				}
+				files++;
+				yyrestart(f);
+				current_src = new source;
+				current_src->filename = std::string(argv[i]);
+				current_src->parseresult=yyparse();
+				rc|=current_src->parseresult;
+				sources.push_back(current_src);
+				fclose(f);
+				current_src=NULL;
+			}
+		}
+	}
+	if( argc<2 || files==0 ) {  // Read input from stdin
+		yylineno = 1;
+		current_src = new source;
+		current_src->filename = std::string("stdin");
+		current_src->parseresult=yyparse();
+		rc|=current_src->parseresult;
+		sources.push_back(current_src);
+		current_src=NULL;
+	}
+	if(!rc) { 
+		IF_VERBOSE printf("All input has been parsed successful.\n"); 
+		ast2dot();
+		ast2python();
+	}
+	else
+		printf("There was a parsing error. Check syntax and try again.\n");
+	return rc;
+}
+ 

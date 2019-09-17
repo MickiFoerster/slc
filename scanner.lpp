@@ -1,0 +1,52 @@
+%option noyywrap yylineno
+
+%x COMMENT
+
+%{
+#include "yystype.h"
+#include <stdio.h>
+#include <stdarg.h>
+#include "parser.h"
+
+/* Size of lexer buffer 
+#undef YY_BUF_SIZE
+#define YY_BUF_SIZE 33554432
+*/
+
+%}
+
+WS											[\t\ \n]+
+IDENTIFIER									[_A-Za-z][_A-Za-z0-9]*
+INT											[0-9]+
+FLOAT										{INT}.{INT}
+
+%%
+
+"/*"										{ BEGIN(COMMENT); }
+<COMMENT>"*/"								{ BEGIN(INITIAL); }
+<COMMENT>([^*]|\n)+|.						{}
+<COMMENT><<EOF>>							{ yyerror("Unterminated comment"); return 0;}
+"//".*\n									{}
+{WS}										{}
+"sin"										{  info("SIN found"); return SIN; }
+"for"										{  info("FOR found"); return FOR; }
+{IDENTIFIER}						{  
+										info("IDENTIFIER found: %s", yytext); 
+									   	yylval = new ast_node(ast_IDENTIFIER, yytext);
+										return IDENTIFIER; 
+									}
+{INT}								{  
+										info("INT found"); 
+									   	yylval = new ast_node(ast_INT, yytext);
+										return INT; 
+									}
+{FLOAT}								{  
+										info("FLOAT found"); 
+									   	yylval = new ast_node(ast_FLOAT, yytext);
+										return FLOAT; 
+									}
+.									{  info("DEFAULT rule for char: '%c'", yytext[0]); return yytext[0]; }
+
+
+%%
+ 
